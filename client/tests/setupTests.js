@@ -48,17 +48,81 @@ beforeAll(async () => {
 
   window.localStorage.setItem('token', registrationPayload.token);
 
-  const seedPerkResponse = await api.post('/perks', {
-    title: 'Integration Preview Benefit',
-    description: 'Baseline record created during setup for deterministic rendering checks.',
-    category: 'travel',
-    merchant: 'Integration Merchant',
-    discountPercent: 15
-  });
-
-  const seededPerk = seedPerkResponse.data.perk;
-  if (seededPerk?._id) {
-    createdPerkIds.add(seededPerk._id);
+  let seededPerk;
+  try {
+    const seedPerkResponse = await api.post('/perks', {
+      title: 'Integration Preview Benefit',
+      description: 'Baseline record created during setup for deterministic rendering checks.',
+      category: 'travel',
+      merchant: 'Integration Merchant',
+      discountPercent: 15
+    });
+    
+    // Handle different response formats
+    seededPerk = seedPerkResponse.data.perk || seedPerkResponse.data;
+    
+    if (seededPerk?._id) {
+      createdPerkIds.add(seededPerk._id);
+    }
+    
+  } catch (error) {
+    if (error.response?.status === 409) {
+      console.log('Perk already exists (409), fetching existing perks...');
+      
+      // Try to fetch the existing perk
+      try {
+        const perksResponse = await api.get('/perks');
+        
+        // Handle different response formats - the data might be an object with a perks array
+        let perksArray;
+        if (Array.isArray(perksResponse.data)) {
+          perksArray = perksResponse.data;
+        } else if (Array.isArray(perksResponse.data.perks)) {
+          perksArray = perksResponse.data.perks;
+        } else {
+          // Try /perks/all endpoint which seems to return an array
+          const allPerksResponse = await api.get('/perks/all');
+          perksArray = Array.isArray(allPerksResponse.data) ? allPerksResponse.data : [];
+        }
+        
+        const existingPerk = perksArray.find(perk => 
+          perk.title === 'Integration Preview Benefit' && 
+          perk.merchant === 'Integration Merchant'
+        );
+        
+        if (existingPerk) {
+          seededPerk = existingPerk;
+          console.log('Found existing perk:', existingPerk._id);
+          
+          if (seededPerk?._id) {
+            createdPerkIds.add(seededPerk._id);
+          }
+        } else {
+          // Last resort: create with a unique name
+          const uniqueTitle = `Integration Preview Benefit ${Date.now()}`;
+          console.log('Creating new unique perk:', uniqueTitle);
+          
+          const newPerkResponse = await api.post('/perks', {
+            title: uniqueTitle,
+            description: 'Baseline record created during setup for deterministic rendering checks.',
+            category: 'travel',
+            merchant: 'Integration Merchant',
+            discountPercent: 15
+          });
+          
+          seededPerk = newPerkResponse.data.perk || newPerkResponse.data;
+          if (seededPerk?._id) {
+            createdPerkIds.add(seededPerk._id);
+          }
+        }
+      } catch (fetchError) {
+        console.error('Error fetching existing perks:', fetchError);
+        throw fetchError;
+      }
+    } else {
+      // Re-throw other errors
+      throw error;
+    }
   }
 
   global.__TEST_CONTEXT__ = {
